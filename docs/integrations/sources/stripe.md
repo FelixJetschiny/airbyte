@@ -49,13 +49,24 @@ For more information on Stripe API Keys, see the [Stripe documentation](https://
 5. For **Account ID**, enter your Stripe Account ID. This ID begins with `acct_`, and can be found in the top-right corner of your Stripe [account settings page](https://dashboard.stripe.com/settings/account).
 6. For **Secret Key**, enter the restricted key you created for the connection.
 7. For **Replication Start Date**, use the provided datepicker or enter a UTC date and time programmatically in the format `YYYY-MM-DDTHH:mm:ssZ`. The data added on and after this date will be replicated.
-8. (Optional) For **Lookback Window**, you may specify a number of days from the present day to reread data. This allows the connector to retrieve data that might have been updated after its initial creation, and is useful for handling any post-transaction adjustments. This applies only to streams that do not support event-based incremental syncs, please see [the list below](#troubleshooting).
+8. (Optional) For **Lookback Window**, you may specify a number of days from the present day to reread data. This allows the connector to retrieve data that might have been updated after its initial creation, and is useful for handling any post-transaction adjustments. This applies to incremental syncs, including event-based incremental streams. For event-based streams, the lookback range is still constrained by the [Events API retention limit](https://stripe.com/docs/api/events) of 30 days.
 
    - Leaving the **Lookback Window** at its default value of 0 means Airbyte will not re-export data after it has been synced.
    - Setting the **Lookback Window** to 1 means Airbyte will re-export data from the past day, capturing any changes made in the last 24 hours.
    - Setting the **Lookback Window** to 7 means Airbyte will re-export and capture any data changes within the last week.
 
-9. (Optional) For **Data Request Window**, you may specify the time window in days used by the connector when requesting data from the Stripe API. This window defines the span of time covered in each request, with larger values encompassing more days in a single request. Generally speaking, the lack of overhead from making fewer requests means a larger window is faster to sync. However, this also means the state of the sync will persist less frequently. If an issue occurs or the sync is interrupted, a larger window means more data will need to be resynced, potentially causing a delay in the overall process.
+<FieldAnchor field="event_based_incremental_sync_mode">
+
+9. (Optional) For **Event-based Incremental Sync Mode**, choose how Airbyte should process streams that support event-based incremental syncs after the stream already has state.
+
+   - `events` (default): Airbyte reads the changed object directly from `event.data.object` in the Stripe Events API response.
+   - `hydrated_events`: Airbyte still uses the Stripe Events API to discover which records changed, but then rereads each changed record from that stream's resource endpoint before emitting it. The emitted record therefore comes from the stream endpoint rather than from the event payload, and any stream-specific `expand[]` parameters configured in the connector are applied again during that reread.
+
+   Use `hydrated_events` when you want incremental syncs to prefer the latest record from the object endpoint over the object snapshot embedded in the Stripe event.
+
+</FieldAnchor>
+
+10. (Optional) For **Data Request Window**, you may specify the time window in days used by the connector when requesting data from the Stripe API. This window defines the span of time covered in each request, with larger values encompassing more days in a single request. Generally speaking, the lack of overhead from making fewer requests means a larger window is faster to sync. However, this also means the state of the sync will persist less frequently. If an issue occurs or the sync is interrupted, a larger window means more data will need to be resynced, potentially causing a delay in the overall process.
 
    For example, if you are replicating three years worth of data:
 
@@ -64,17 +75,17 @@ For more information on Stripe API Keys, see the [Stripe documentation](https://
 
    If you are unsure of which value to use, we recommend leaving this setting at its default value of 365 days.
 
-10. (Optional) For **Streams with API Data Retention Validation**, select which streams should validate cursor age against Stripe's 30-day event retention period. When a selected stream's cursor is older than 30 days, the connector performs a full refresh to avoid missing data due to the [Events API retention limit](https://stripe.com/docs/api/events). Streams not selected here will always use incremental sync regardless of cursor age.
+11. (Optional) For **Streams with API Data Retention Validation**, select which streams should validate cursor age against Stripe's 30-day event retention period. When a selected stream's cursor is older than 30 days, the connector performs a full refresh to avoid missing data due to the [Events API retention limit](https://stripe.com/docs/api/events). Streams not selected here will always use incremental sync regardless of cursor age.
 
    By default, no streams are selected — all streams will use incremental sync without cursor age validation. You can add streams to this list based on your account's usage patterns. For high-usage streams like `charges`, `invoice_items`, `invoice_line_items`, `invoices`, `payment_intents`, and `payouts`, enabling cursor age validation is recommended since a stale cursor likely indicates missed data rather than normal inactivity.
 
    Streams like `customers`, `subscriptions`, `products`, and `plans` may not need validation because some accounts legitimately have no new records in 30+ days, and forcing a full refresh would be unnecessary.
 
-11. (Optional) For **Number of Concurrent Threads**, enter the number of worker threads to use for the sync. The default is 10. You can set this to any value between 2 and 100. Higher values increase throughput but also increase API usage. The effective upper bound depends on your Stripe account's rate limits.
+12. (Optional) For **Number of Concurrent Threads**, enter the number of worker threads to use for the sync. The default is 10. You can set this to any value between 2 and 100. Higher values increase throughput but also increase API usage. The effective upper bound depends on your Stripe account's rate limits.
 
-12. (Optional) For **Max Number of API Calls per Second**, enter the maximum number of API requests per second the connector is allowed to make. If not specified, the connector defaults to 25 calls per second for test and sandbox API keys and 100 calls per second for live API keys. This value cannot exceed Stripe's actual [rate limits](https://stripe.com/docs/rate-limits).
+13. (Optional) For **Max Number of API Calls per Second**, enter the maximum number of API requests per second the connector is allowed to make. If not specified, the connector defaults to 25 calls per second for test and sandbox API keys and 100 calls per second for live API keys. This value cannot exceed Stripe's actual [rate limits](https://stripe.com/docs/rate-limits).
 
-13. Click **Set up source** and wait for the tests to complete.
+14. Click **Set up source** and wait for the tests to complete.
 
 <HideInUI>
 
@@ -176,7 +187,7 @@ Please be aware: this also means that any change older than 30 days will not be 
 
 To prevent data loss caused by the 30-day Events API retention limit, the connector can validate the age of each stream's cursor before choosing between incremental and full refresh sync. If a stream's cursor is older than 30 days, the connector automatically falls back to a full refresh for that stream instead of using the Events API, which would only return the last 30 days of data.
 
-**This behavior is configurable via the "Streams with API Data Retention Validation" setting** (see [setup guide](#step-2-set-up-the-stripe-connector-in-airbyte) step 10). Only streams listed in this setting will have their cursor age validated. By default, no streams are selected — all streams will use incremental sync without cursor age validation.
+**This behavior is configurable via the "Streams with API Data Retention Validation" setting** (see [setup guide](#step-2-set-up-the-stripe-connector-in-airbyte) step 11). Only streams listed in this setting will have their cursor age validated. By default, no streams are selected — all streams will use incremental sync without cursor age validation.
 
 For high-usage streams like `Charges`, `Invoice Items`, `Invoice Line Items`, `Invoices`, `Payment Intents`, and `Payouts`, enabling cursor age validation is recommended since a stale cursor likely indicates missed data rather than normal inactivity. Streams like `Customers`, `Subscriptions`, `Products`, and `Plans` may not need validation because some accounts legitimately have no new records in 30+ days, making a full refresh unnecessary.
 
@@ -223,6 +234,18 @@ You can customize which streams have cursor age validation by modifying the **St
 :::
 
 ### Troubleshooting
+
+For streams that support event-based incremental syncs, the connector offers two modes:
+
+- `events`: Uses the object embedded in the Stripe event payload.
+- `hydrated_events`: Uses the Stripe event only as the change signal, then rereads the changed object from the stream's resource endpoint before emitting it.
+
+The important difference is the source of truth for the emitted record:
+
+- In `events` mode, the incremental record is whatever Stripe placed inside `event.data.object`.
+- In `hydrated_events` mode, the incremental record comes from the stream endpoint, so it reflects the endpoint response shape and reapplies any stream-specific `expand[]` parameters configured in the connector.
+
+Both modes still depend on the Stripe Events API to discover which records changed, so both are subject to the same 30-day event retention limit.
 
 Since the Stripe API does not allow querying objects which were updated since the last sync, the Stripe connector uses the Events API under the hood to implement incremental syncs and export data based on its update date.
 However, not all the entities are supported by the Events API, so the Stripe connector uses the `created` field or its analogue to query for new data in your Stripe account. These are the entities synced based on the date of creation:
@@ -313,6 +336,7 @@ Each record is marked with `is_deleted` flag when the appropriate event happens 
 
 | Version     | Date       | Pull Request                                                 | Subject                                                                                                                                                                                                                       |
 |:------------|:-----------|:-------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 6.1.0 | 2026-04-30 | N/A | Add configurable `event_based_incremental_sync_mode` with new `hydrated_events` behavior for event-based incremental streams. |
 | 6.0.3 | 2026-04-28 | [77424](https://github.com/airbytehq/airbyte/pull/77424) | Update dependencies |
 | 6.0.2 | 2026-04-21 | [76777](https://github.com/airbytehq/airbyte/pull/76777) | Update dependencies |
 | 6.0.1 | 2026-04-13 | [76276](https://github.com/airbytehq/airbyte/pull/76276) | Rename "concurrent workers" to "concurrent threads" in connector spec |
