@@ -60,7 +60,7 @@ For more information on Stripe API Keys, see the [Stripe documentation](https://
 9. (Optional) For **Event-based Incremental Sync Mode**, choose how Airbyte should process streams that support event-based incremental syncs after the stream already has state.
 
    - `events` (default): Airbyte reads the changed object directly from `event.data.object` in the Stripe Events API response.
-   - `hydrated_events`: Airbyte still uses the Stripe Events API to discover which records changed, but then rereads each changed record from that stream's resource endpoint before emitting it. The emitted record therefore comes from the stream endpoint rather than from the event payload, and any stream-specific `expand[]` parameters configured in the connector are applied again during that reread.
+   - `hydrated_events`: Airbyte still uses the Stripe Events API to discover which records changed, but then rereads each changed record from that stream's resource endpoint before emitting it. The emitted record therefore comes from the stream endpoint rather than from the event payload, and any stream-specific `expand[]` parameters configured in the connector are applied again during that reread. If multiple events for the same object are observed in the same sync window, the connector deduplicates by object ID before hydration and performs one hydration call per unique object.
 
    Use `hydrated_events` when you want incremental syncs to prefer the latest record from the object endpoint over the object snapshot embedded in the Stripe event.
 
@@ -246,6 +246,8 @@ The important difference is the source of truth for the emitted record:
 - In `hydrated_events` mode, the incremental record comes from the stream endpoint, so it reflects the endpoint response shape and reapplies any stream-specific `expand[]` parameters configured in the connector.
 
 Both modes still depend on the Stripe Events API to discover which records changed, so both are subject to the same 30-day event retention limit.
+
+Hydrated mode also changes the API-call pattern: `events` emits directly from the event payload, while `hydrated_events` performs additional object-endpoint requests after event detection. Duplicate events for the same object in one sync window are deduplicated before hydration, so only one hydration request is made per unique object.
 
 Since the Stripe API does not allow querying objects which were updated since the last sync, the Stripe connector uses the Events API under the hood to implement incremental syncs and export data based on its update date.
 However, not all the entities are supported by the Events API, so the Stripe connector uses the `created` field or its analogue to query for new data in your Stripe account. These are the entities synced based on the date of creation:
